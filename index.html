@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Interactive Points Table</title>
+<style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    table { border-collapse: collapse; margin-bottom: 20px; }
+    td, th {
+        width: 40px; height: 30px; text-align: center; vertical-align: middle;
+        border: 1px solid #ccc; user-select: none;
+        transition: background 0.2s, color 0.2s, transform 0.1s;
+        font-size: 14px;
+    }
+    td.selected { background-color: #b39ddb; color: white; font-weight: bold; border-radius: 4px; }
+    td.green { background-color: #a2d9a1; color: white; border-radius: 4px; }
+    td.yellow { background-color: #fff3b0; border-radius: 4px; }
+    td.orange { background-color: #f5b76e; color: white; border-radius: 4px; }
+    td.red { background-color: #f08080; color: white; border-radius: 4px; }
+    td.empty { background-color: #f2f2f2; border-radius: 4px; }
+    td:hover { outline: 2px solid #666; cursor: pointer; transform: scale(1.05); }
+
+    input.dataCell {
+        width: 25px; height: 20px; text-align: center;
+        border: 1px solid #ccc; font-size:12px;
+        border-radius: 3px;
+    }
+    #dataContainer { border:1px solid #ccc; padding:10px; margin-top:10px; background:#fff; border-radius:5px; }
+    button { margin: 10px 5px; padding: 5px 10px; cursor: pointer; border-radius: 3px; background:#eee; }
+    button:hover { background:#ddd; }
+    #stats {
+        font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #222;
+        background:#fff3c6; padding:5px 10px; border-radius:5px; display:inline-block;
+    }
+    th { background:#e0e0e0; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<h2>Interactive Planning Table</h2>
+<div>
+    <button id="initializeBtn">Initialize</button>
+    <button id="clearBtn">Clear All</button>
+    <button id="toggleDataBtn">Show/Hide Data Table</button>
+</div>
+
+<div id="stats">
+    Total Points: <span id="totalPoints">0</span> | Days Selected: <span id="totalDays">0</span>
+</div>
+
+<table id="pointsTable"></table>
+
+<div id="dataContainer" style="display:none;">
+    <h3>Data Table (editable)</h3>
+    <p>Edit values here; changes will reflect in Planning on Initialize.</p>
+    <button id="importCsvBtn">Import CSV</button>
+    <input type="file" id="csvFileInput" accept=".csv" style="display:none;">
+    <p>CSV format: 12 rows × 31 columns, values separated by commas or semicolons. Empty cells allowed.</p>
+    <table id="dataTable"></table>
+</div>
+
+<script>
+const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+const days = Array.from({length:31},(_,i)=>i+1);
+const rows = 12;
+const cols = 31;
+const STORAGE_KEY = "planningData";
+
+let data = [];
+let selected = [];
+let isMouseDown = false;
+let isSelecting = true;
+
+const table = document.getElementById('pointsTable');
+const dataTbl = document.getElementById('dataTable');
+const dataContainer = document.getElementById('dataContainer');
+
+// --- Local Storage Functions ---
+function loadDataFromStorage() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(saved) {
+        try {
+            data = JSON.parse(saved);
+        } catch(e) { console.warn("Failed to parse stored data."); initData(); }
+    } else { initData(); }
+}
+
+function saveDataToStorage() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// Initialize empty data
+function initData() {
+    data = [];
+    for (let r = 0; r < rows; r++) {
+        data[r] = [];
+        for (let c = 0; c < cols; c++) data[r][c] = '';
+    }
+}
+
+// Create editable data table
+function createDataTable() {
+    dataTbl.innerHTML = '';
+    const header = document.createElement('tr');
+    header.appendChild(document.createElement('th'));
+    days.forEach(d => { const th = document.createElement('th'); th.textContent=d; header.appendChild(th); });
+    dataTbl.appendChild(header);
+
+    for (let r=0; r<rows; r++) {
+        const tr = document.createElement('tr');
+        const th = document.createElement('th'); th.textContent=months[r]; tr.appendChild(th);
+        for (let c=0; c<cols; c++) {
+            const td = document.createElement('td');
+            const input = document.createElement('input');
+            input.type='text'; input.className='dataCell'; input.value=data[r][c];
+            input.dataset.row=r; input.dataset.col=c;
+
+            input.addEventListener('input', e => {
+                const r=parseInt(e.target.dataset.row);
+                const c=parseInt(e.target.dataset.col);
+                data[r][c] = e.target.value;
+                saveDataToStorage();
+            });
+            td.appendChild(input); tr.appendChild(td);
+        }
+        dataTbl.appendChild(tr);
+    }
+}
+
+// Determine cell class based on value
+function getCellClass(value){
+    if(value==="S") return "selected";
+    if(value==3) return "green";
+    if(value==-1) return "yellow";
+    if(value==-3) return "orange";
+    if(value==-5) return "red";
+    if(value==="") return "empty";
+    return "";
+}
+
+// Create Planning Table
+function createPlanning(){
+    table.innerHTML=''; selected=[];
+    const header=document.createElement('tr');
+    header.appendChild(document.createElement('th'));
+    days.forEach(d=>{const th=document.createElement('th'); th.textContent=d; header.appendChild(th);});
+    table.appendChild(header);
+
+    for(let r=0;r<rows;r++){
+        const tr=document.createElement('tr');
+        const th=document.createElement('th'); th.textContent=months[r]; tr.appendChild(th);
+        for(let c=0;c<cols;c++){
+            const td=document.createElement('td');
+            td.textContent=data[r][c]; td.dataset.row=r; td.dataset.col=c; td.className=getCellClass(data[r][c]);
+            attachDragEvents(td);
+            tr.appendChild(td);
+        }
+        table.appendChild(tr);
+    }
+    updateStats();
+    saveDataToStorage();
+}
+
+// Drag select events
+function attachDragEvents(td){
+    td.addEventListener('mousedown',cellMouseDown);
+    td.addEventListener('mouseover',cellMouseOver);
+    td.addEventListener('mouseup',cellMouseUp);
+}
+function cellMouseDown(e){ e.preventDefault(); isMouseDown=true; const td=e.target;
+    const r=td.dataset.row; const c=td.dataset.col; const key=r+'-'+c;
+    isSelecting=!selected.includes(key); applyCell(td,r,c);
+}
+function cellMouseOver(e){ if(!isMouseDown) return; const td=e.target; const r=td.dataset.row; const c=td.dataset.col; applyCell(td,r,c); }
+function cellMouseUp(){ isMouseDown=false; }
+
+function applyCell(td,r,c){
+    const key=r+'-'+c;
+    if(isSelecting){ if(!selected.includes(key)){ selected.push(key); td.textContent="S"; td.className=getCellClass("S"); } }
+    else{ if(selected.includes(key)){ selected=selected.filter(k=>k!==key); td.textContent=data[r][c]; td.className=getCellClass(data[r][c]); } }
+    updateStats();
+}
+
+function updateStats(){
+    let totalPoints=0;
+    for(let k of selected){ const [r,c]=k.split('-'); totalPoints += parseFloat(data[r][c])||0; }
+    document.getElementById('totalPoints').textContent=totalPoints;
+    document.getElementById('totalDays').textContent=selected.length;
+}
+
+function clearAll(){ createPlanning(); }
+
+// Toggle Data Table
+document.getElementById('toggleDataBtn').addEventListener('click', ()=>{ dataContainer.style.display=(dataContainer.style.display==='none')?'block':'none'; });
+document.getElementById('initializeBtn').addEventListener('click', createPlanning);
+document.getElementById('clearBtn').addEventListener('click', clearAll);
+
+// CSV Import
+document.getElementById('importCsvBtn').addEventListener('click', ()=>{ document.getElementById('csvFileInput').click(); });
+document.getElementById('csvFileInput').addEventListener('change', function(event){
+    const file = event.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e){
+        const text = e.target.result;
+        const rowsData = text.trim().split('\n'); if(rowsData.length!==12){ alert("CSV must have 12 rows."); return; }
+        for(let r=0;r<12;r++){
+            const values = rowsData[r].includes(';') ? rowsData[r].split(';') : rowsData[r].split(',');
+            if(values.length!==31){ alert(`Row ${r+1} must have 31 columns.`); return; }
+            for(let c=0;c<31;c++){
+                data[r][c] = values[c].trim();
+            }
+        }
+        const wasHidden = dataContainer.style.display==='none';
+        if(wasHidden) dataContainer.style.display='block';
+        createDataTable(); createPlanning();
+        if(wasHidden) dataContainer.style.display='none';
+        saveDataToStorage();
+    };
+    reader.readAsText(file);
+});
+
+// Init
+loadDataFromStorage();
+createDataTable();
+createPlanning();
+
+</script>
+</body>
+</html>
